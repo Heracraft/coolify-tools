@@ -173,10 +173,12 @@ func streamToEncryptedTarArchive(client *ssh.Client, signer ssh.Signer, destinat
 // backupCmd represents the backup command
 var backupCmd = &cobra.Command{
 	Use:   "backup",
-	Short: "Creates a full backup of a coolify instance into a .tar.xz.age file",
-	Long: `Copies the contents of /data/coolify into a tar archive and encrypts it with a ssh key:
+	Short: "Creates an encrypted backup of the Coolify core and volumes",
+	Long: `Connects to a Coolify instance, archives the /data/coolify directory alongside non-database volumes, and encrypts everything locally with an SSH key.
 
-coolify-tools backup <hostname> <ssh-key>`,
+Example:
+  coolify-tools backup <hostname> <path-to-ssh-key>
+  coolify-tools backup server.example.com ~/.ssh/id_ed25519`,
 	Args: cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		// TODO: tie vars to args and validate them
