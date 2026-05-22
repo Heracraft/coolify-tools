@@ -28,7 +28,7 @@ func GetSigner(key string, flagPassphrase string) ssh.Signer {
 
 	if err != nil {
 		if errors.As(err, &PassphraseMissingError) {
-			var passphrase []byte;
+			var passphrase []byte
 
 			if flagPassphrase == "" {
 
@@ -42,8 +42,10 @@ func GetSigner(key string, flagPassphrase string) ssh.Signer {
 						passpharse[i] = 0
 					}
 				}()
-			} else{
-				passphrase := []byte(flagPassphrase)
+			} else {
+				passphrase = []byte(flagPassphrase)
+
+				fmt.Println(flagPassphrase)
 
 				defer func() {
 					for i := range passphrase {
@@ -51,7 +53,6 @@ func GetSigner(key string, flagPassphrase string) ssh.Signer {
 					}
 				}()
 			}
-
 
 			privateKey, err = ssh.ParsePrivateKeyWithPassphrase(file, passphrase)
 
