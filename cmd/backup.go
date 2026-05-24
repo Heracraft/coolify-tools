@@ -23,17 +23,31 @@ import (
 	"coolify-tools/internal/utils"
 )
 
-var username string
-var sshPort string
-var passpharse string
-
 var ouputDir string
+var clean bool
+
+type DBEngine string
+
+const (
+	EnginePostgres   DBEngine = "postgres"
+	EngineMysql      DBEngine = "mysql"
+	EngineMariadb    DBEngine = "mariadb"
+	EngineMongo      DBEngine = "mongo"
+	EngineRedis      DBEngine = "redis"
+	EngineClickhouse DBEngine = "clickhouse"
+)
+
+var dbKeywords = []DBEngine{
+	EnginePostgres, EngineMysql, EngineMariadb, EngineMongo, EngineRedis, EngineClickhouse,
+}
 
 type Metadata struct {
-	Timestamp      string         `json:"timestamp"`
-	CoolifyVersion string         `json:"coolifyVersion"`
-	Core           VolumeBackup   `json:"core"`
-	Volumes        []VolumeBackup `json:"volumes"`
+	Timestamp      string           `json:"timestamp"`
+	CoolifyVersion string           `json:"coolifyVersion"`
+	Config         VolumeBackup     `json:"config"`
+	CoreDB         DatabaseBackup   `json:"coreDB"`
+	Volumes        []VolumeBackup   `json:"volumes"`
+	Databases      []DatabaseBackup `json:"databases"`
 }
 
 type VolumeBackup struct {
@@ -42,6 +56,12 @@ type VolumeBackup struct {
 	ContainerName string `json:"containerName"`
 	ArchiveName   string `json:"archiveName"`
 	Destination   string `json:"destination"`
+}
+
+type DatabaseBackup struct {
+	ContainerName string   `json:"containerName"`
+	Engine        DBEngine `json:"engine"`
+	ArchiveName   string   `json:"archiveName"`
 }
 
 type Container struct {
@@ -61,12 +81,8 @@ type Mount struct {
 func isDatabaseImage(image string) bool {
 	image = strings.ToLower(image)
 
-	dbKeywords := []string{
-		"postgres", "mysql", "mariadb", "mongo", "redis", "clickhouse",
-	}
-
 	for _, kw := range dbKeywords {
-		if strings.Contains(image, kw) {
+		if strings.Contains(image, string(kw)) {
 			return true
 		}
 	}
@@ -129,7 +145,7 @@ func getRunningContainers(client *ssh.Client) []Container {
 	return containers
 }
 
-func streamToEncryptedTarArchive(client *ssh.Client, signer ssh.Signer, destination string, cmd string) {
+func streamToEncryptedTarArchive(client *ssh.Client, signer ssh.Signer, destination string, cmd string) error {
 
 	var recipient age.Recipient
 	var err error
@@ -147,7 +163,7 @@ func streamToEncryptedTarArchive(client *ssh.Client, signer ssh.Signer, destinat
 	utils.HandleErr("Failed to create age recipient from SSH key", err)
 
 	localFile, err := os.Create(destination)
-	utils.HandleErr("failed to read local path", err)
+	utils.HandleErr("failed to create local path", err)
 	defer localFile.Close()
 
 	ageEncryptor, err := age.Encrypt(localFile, recipient)
@@ -156,6 +172,7 @@ func streamToEncryptedTarArchive(client *ssh.Client, signer ssh.Signer, destinat
 
 	session, err := client.NewSession()
 	utils.HandleErr("failed to establish session", err)
+	defer session.Close()
 
 	session.Stdout = ageEncryptor
 	session.Stderr = os.Stderr
@@ -163,11 +180,13 @@ func streamToEncryptedTarArchive(client *ssh.Client, signer ssh.Signer, destinat
 	// --
 
 	if err := session.Run(cmd); err != nil {
-		log.Fatalf("Backup failed: %v", err)
+		// log.Println("Backup failed: %v", err)
+		// deal with corrupted archive that is created
+		return err
 	}
 
 	log.Println("Transfer complete for: ", destination)
-
+	return nil
 }
 
 // backupCmd represents the backup command
@@ -181,16 +200,16 @@ Example:
   coolify-tools backup server.example.com ~/.ssh/id_ed25519`,
 	Args: cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		// TODO: tie vars to args and validate them
+		// TODO: validate args
 
 		hostname := args[0]
 		sshKey := args[1]
 
-		client, signer := internalssh.EstablishConnection(username, hostname, sshKey, sshPort, passpharse)
+		client, signer := internalssh.EstablishConnection(username, hostname, sshKey, sshPort, passphrase)
 
 		defer client.Close()
 
-		fmt.Println(signer.PublicKey().Type())
+		// fmt.Println(signer.PublicKey().Type())
 
 		timestamp := time.Now().Format("20060102_150405")
 
@@ -198,7 +217,8 @@ Example:
 		var metadata = Metadata{Timestamp: timestamp, CoolifyVersion: "v4.1.0"}
 
 		if err := exec.Command("mkdir", "-p", ouputDir).Run(); err != nil {
-			log.Fatal("failed to create dir %v", err)
+			// TODO: replace mkdir -p with os.MkdirAll(backupDir, 0755)
+			log.Fatalf("failed to create dir %v", err)
 		}
 
 		backupDir := fmt.Sprintf("%s/%s", ouputDir, timestamp)
@@ -206,13 +226,17 @@ Example:
 		// var backupDirCmd = fmt.Sprintf("mkdir -p %s", backupDir)
 
 		if err := exec.Command("mkdir", "-p", backupDir).Run(); err != nil {
-			log.Fatal("failed to create dir %v", err)
+			log.Fatalf("failed to create dir %v", err)
 		}
 
-		metadata.Core.ArchiveName = "core.tar.gz.age"
-		metadata.Core.Destination = "/data/coolify/"
+		metadata.Config.ArchiveName = "core.tar.gz.age"
+		metadata.Config.Destination = "/data/coolify/"
 
-		streamToEncryptedTarArchive(client, signer, backupDir+"/core.tar.gz.age", "tar -czf - /data/coolify")
+		backupErr := streamToEncryptedTarArchive(client, signer, backupDir+"/core.tar.gz.age", "tar -czf - /data/coolify")
+
+		if backupErr != nil {
+			log.Printf("Backup failed for %s: %v", "/data/coolify", backupErr)
+		}
 
 		runningContainers := getRunningContainers(client)
 
@@ -221,7 +245,7 @@ Example:
 		}
 
 		// TODO: skip the following except metadata stuff if running containers is nil
-		fileVolumes, _ := categorizeVolumes(runningContainers)
+		fileVolumes, dbVolumes := categorizeVolumes(runningContainers)
 
 		// '_' -> Db volumes are ignored for now.
 
@@ -240,12 +264,13 @@ Example:
 
 				remoteCmd := fmt.Sprintf("docker run --rm -v %s:/source:ro alpine tar -czf - -C /source .", mount.Name)
 
-				// cleanName := strings.TrimPrefix(mount.Name, "/")
 				archiveName := fmt.Sprintf("volume_%s.tar.gz.age", mount.Name)
 				localPath := fmt.Sprintf("%s/%s", backupDir, archiveName)
-				streamToEncryptedTarArchive(client, signer, localPath, remoteCmd)
 
-				// destinations = append(destinations, mount.Destination)
+				backupErr := streamToEncryptedTarArchive(client, signer, localPath, remoteCmd)
+				if backupErr != nil {
+					log.Printf("Backup failed for %s: %v", mount.Name, backupErr)
+				}
 
 				metadata.Volumes = append(metadata.Volumes, VolumeBackup{
 					Name:          mount.Name,
@@ -258,6 +283,79 @@ Example:
 
 		}
 
+		for _, db := range dbVolumes {
+			cleanDbName := strings.TrimPrefix(db.Name, "/")
+			var engine DBEngine
+
+			for _, kw := range dbKeywords {
+				if strings.Contains(db.Config.Image, strings.ToLower(string(kw))) {
+					engine = kw
+				}
+			}
+
+			var extension, remoteCmd string
+
+			// TODO: compress db dumps before archiving
+			switch engine {
+			case EngineMongo:
+				fmt.Printf("Skipping MongoDB database: %s\n", cleanDbName)
+				continue
+			case EngineMariadb:
+				fmt.Printf("Skipping MariaDB database: %s\n", cleanDbName)
+				continue
+			case EnginePostgres:
+				cleanFlag := ""
+				if clean {
+					cleanFlag = "--clean "
+				}
+				remoteCmd = fmt.Sprintf(`docker exec %s sh -c 'pg_dumpall %s-U ${POSTGRES_USER:-postgres}'`, cleanDbName, cleanFlag)
+				extension = "sql"
+			case EngineMysql:
+				cleanFlag := ""
+				if clean {
+					cleanFlag = "--add-drop-database --add-drop-table "
+				}
+				remoteCmd = fmt.Sprintf(`docker exec %s sh -c 'mysqldump %s-u root -p"${MYSQL_ROOT_PASSWORD}" --single-transaction --routines --triggers --all-databases'`, cleanDbName, cleanFlag)
+				extension = "sql"
+			case EngineRedis:
+				// TODO: look into REPLCONF capa error: NOAUTH Authentication required.
+				// use a common env like REDIS_PASSWORD? or just ignore?
+
+				// Native command to force an RDB snapshot and stream it to stdout
+				// remoteCmd = fmt.Sprintf(`docker exec %s redis-cli --rdb /dev/stdout`, cleanDbName)
+				// extension = "rdb"
+				fmt.Printf("Skipping Redis: %s\n", cleanDbName)
+				continue
+
+			default:
+				fmt.Printf("unsupported db %s, skipping", db.Name)
+				continue
+			}
+
+			archiveName := fmt.Sprintf("db_%s.%s.age", cleanDbName, extension)
+
+			localPath := fmt.Sprintf("%s/%s", backupDir, archiveName)
+
+			backupErr := streamToEncryptedTarArchive(client, signer, localPath, remoteCmd)
+			if backupErr != nil {
+				log.Printf("Backup failed for %s: %v", cleanDbName, backupErr)
+			}
+
+			if cleanDbName != "coolify-db" {
+				metadata.Databases = append(metadata.Databases, DatabaseBackup{
+					ContainerName: cleanDbName,
+					Engine:        engine,
+					ArchiveName:   archiveName,
+				})
+			} else {
+				metadata.CoreDB = DatabaseBackup{
+					ContainerName: db.Name,
+					Engine:        EnginePostgres,
+					ArchiveName:   archiveName,
+				}
+			}
+		}
+
 		fileData, err := json.MarshalIndent(metadata, "", "    ")
 		utils.HandleErr("failed to marshal metadata", err)
 
@@ -267,12 +365,8 @@ Example:
 }
 
 func init() {
-
-	rootCmd.PersistentFlags().StringVarP(&username, "username", "u", "root", "Username(apart from root)")
-	rootCmd.PersistentFlags().StringVarP(&sshPort, "port", "p", "22", "custom ssh port")
-	rootCmd.PersistentFlags().StringVar(&passpharse, "passphrase", "", "private key passphrase")
-
 	backupCmd.PersistentFlags().StringVarP(&ouputDir, "out", "o", ".coolify", "where to save the archives. defaults to .coolify")
+	backupCmd.PersistentFlags().BoolVar(&clean, "clean", false, "Include clean-up instructions (like DROP TABLE) in database dumps")
 
 	rootCmd.AddCommand(backupCmd)
 }
