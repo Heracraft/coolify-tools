@@ -186,9 +186,11 @@ func restoreSSHKeys(client *ssh.Client) {
 var restoreCmd = &cobra.Command{
 	Use:   "restore",
 	Short: "restore your coolify backups to a target machine",
-	Long: `Runs a restore against a target server using a local backup
-	coolify-tools restore <hostname> <sshKey> <backupDir>
-	`,
+	Long: `Runs a restore against a target server using a local backup.
+Connects to the target server, installs Coolify if necessary, and restores the configuration and volumes from the encrypted backup directory.
+
+Example:
+  coolify-tools restore server.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000`,
 	Args: cobra.ExactArgs(3),
 	Run: func(cmd *cobra.Command, args []string) {
 		hostname := args[0]

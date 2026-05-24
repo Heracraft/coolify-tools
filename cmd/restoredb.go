@@ -21,9 +21,11 @@ import (
 var restoreDBCmd = &cobra.Command{
 	Use:   "restoredb",
 	Short: "restore all or a particular database from backups",
-	Long: `Restores the data on all or a particular running container using a local backup
-	coolify-tools restoredb <hostname> <sshKey> <backupDir> <?container-name?>
-	`,
+	Long: `Restores the data on all or a particular running db container using a local backup.
+Assumes the database containers are already running on the target host.
+
+Example:
+  coolify-tools restoredb server.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000`,
 	Args: cobra.MinimumNArgs(3),
 	Run: func(cmd *cobra.Command, args []string) {
 		hostname := args[0]

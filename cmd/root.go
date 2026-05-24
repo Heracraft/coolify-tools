@@ -13,7 +13,10 @@ var passphrase string
 var rootCmd = &cobra.Command{
 	Use:   "coolify-cli",
 	Short: "tooling for using coolify in prod. Starting with instance wide backups",
-	Long:  `Tools for those deploying coolify in production. For now that's instance wide backups encrypted with an SSH key using age`,
+	Long: `Tools for those deploying coolify in production. For now that's instance wide backups encrypted with an SSH key using age
+
+Example:
+  coolify-tools backup server.example.com ~/.ssh/id_ed25519`,
 }
 
 func Execute() {

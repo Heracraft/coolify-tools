@@ -10,6 +10,26 @@ The current integrated backup solution in coolify only supports backing up cooli
 
 This is the product of that need. And I need it yesterday!!!. Might upstream these changes into the official coolify cli when I get time. For now this is a simple tool to aid with my migration. 
 
+### Usage
+
+#### Backup
+Create an encrypted local backup of a Coolify instance.
+```bash
+coolify-tools backup server.example.com ~/.ssh/id_ed25519
+```
+
+#### Restore
+Restore a backup to a target machine.
+```bash
+coolify-tools restore target.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000
+```
+
+#### Restore Database
+Restore databases to running containers from a backup.
+```bash
+coolify-tools restoredb target.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000
+```
+
 ### Limitations
 
 - [ ] Does not backup db images.
