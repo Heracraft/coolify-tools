@@ -122,6 +122,67 @@ func restoreDatabase(client *ssh.Client, rawPrivateKey interface{}, dbMetadata D
 	}
 }
 
+// TODO: Review function below. Mostly slop. 
+func restoreSSHKeys(client *ssh.Client) {
+	log.Println("Restoring Coolify SSH keys to authorized_keys...")
+
+	runCmd := func(cmd string) (string, error) {
+		session, err := client.NewSession()
+		if err != nil {
+			return "", err
+		}
+		defer session.Close()
+		out, err := session.Output(cmd)
+		return string(out), err
+	}
+
+	// Ensure ~/.ssh and authorized_keys exist
+	_, err := runCmd("mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && chmod 700 ~/.ssh && chmod 600 ~/.ssh/authorized_keys")
+	if err != nil {
+		log.Printf("Failed to set up .ssh directory: %v", err)
+	}
+
+	// List files in ssh keys directory
+	out, err := runCmd("ls -1 /data/coolify/ssh/keys/ 2>/dev/null || true")
+	if err != nil {
+		log.Printf("Failed to list ssh keys: %v", err)
+		return
+	}
+
+	files := strings.Split(strings.TrimSpace(out), "\n")
+
+	// Get existing authorized keys
+	authKeysOut, _ := runCmd("cat ~/.ssh/authorized_keys")
+	authorizedKeys := authKeysOut
+
+	for _, file := range files {
+		file = strings.TrimSpace(file)
+		if file == "" || strings.HasSuffix(file, ".lock") {
+			continue
+		}
+
+		keyPath := fmt.Sprintf("/data/coolify/ssh/keys/%s", file)
+
+		// Check if it's a file
+		isDirOut, _ := runCmd(fmt.Sprintf("if [ -f %s ]; then echo 'yes'; else echo 'no'; fi", keyPath))
+		if strings.TrimSpace(isDirOut) != "yes" {
+			continue
+		}
+
+		runCmd(fmt.Sprintf("chmod 600 %s", keyPath))
+
+		pubKeyOut, err := runCmd(fmt.Sprintf("ssh-keygen -y -f %s 2>/dev/null", keyPath))
+		if err == nil {
+			pubKey := strings.TrimSpace(pubKeyOut)
+			if pubKey != "" && !strings.Contains(authorizedKeys, pubKey) {
+				runCmd(fmt.Sprintf("echo '%s' >> ~/.ssh/authorized_keys", pubKey))
+				log.Printf("Added %s to authorized_keys", keyPath)
+				authorizedKeys += "\n" + pubKey
+			}
+		}
+	}
+}
+
 var restoreCmd = &cobra.Command{
 	Use:   "restore",
 	Short: "restore your coolify backups to a target machine",
@@ -180,6 +241,8 @@ var restoreCmd = &cobra.Command{
 		}
 
 		streamDecryptedArchive(client, rawPrivateKey, "tar -xzf - -C /", backupDir+backupMetadata.Config.ArchiveName)
+
+		restoreSSHKeys(client)
 
 		for _, vol := range backupMetadata.Volumes {
 			volPath := backupDir + vol.ArchiveName
