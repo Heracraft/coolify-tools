@@ -23,6 +23,9 @@ This is the product of that need. And I need it yesterday!!!. Might upstream the
 
 Features I plan to implement in the future. Purely based on my needs.
 
+- centralize config: backupDir, archiveName format, defaultSSHPort, ..etc
+
 - Clone command: self explanatory. backup + restore in one
 - Multiple signers: currently only one ssh key is used to sign each tar archive. I think backups should be encrypted by a minimum of 2 keys: your personal key + a backup key. Or even more if in a large team for example
-- Ability to cherrypick volumes: You might want to exclude some volumes from the backups. Rn you can do that by turning the container off but that's wasteful
+- Ability to cherrypick volumes: You might want to exclude some volumes from the backups. Rn you can do that by turning the container off but that's wasteful.
+- Max size for volumes: I found myself transfering a 1 gig + volume of pure logs and I'd wanna skip that next time
