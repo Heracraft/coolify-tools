@@ -1,3 +1,4 @@
 .coolify
 *.age
-*.tar.gz
+*.tar.gzcoolify-tools
+tmp/
