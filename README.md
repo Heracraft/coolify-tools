@@ -1,6 +1,4 @@
-Coolify instance wide backups. Currently only supports creating a an encrypted local backup of the coolify's core plus all non database backups
-
-Working on restoration but it should be super straightforward.
+Coolify instance wide backups. Currently only supports creating a an encrypted local backup of the coolify core, all file volumes and specific db engines. 
 
 ---
 
@@ -12,31 +10,53 @@ This is the product of that need. And I need it yesterday!!!. Might upstream the
 
 ### Usage
 
+### Global Flags
+
+These flags can be used with any command:
+
+- `-u, --username <string>`: SSH Username (default "root")
+- `-p, --port <string>`: Custom SSH port (default "22")
+- `--passphrase <string>`: Private key passphrase
+
 #### Backup
 Create an encrypted local backup of a Coolify instance.
 ```bash
-coolify-tools backup server.example.com ~/.ssh/id_ed25519
+coolify-tools backup server.example.com id_ed25519 [flags]
 ```
+
+**Flags:**
+
+- `-o, --out <string>`: Where to save the archives (default ".coolify")
+- `--clean`: Include clean-up instructions (like DROP TABLE) in database dumps
 
 #### Restore
 Restore a backup to a target machine.
 ```bash
-coolify-tools restore target.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000
+coolify-tools restore target.example.com id_ed25519 .coolify/20260524_120000 [flags]
 ```
+
+**Flags:**
+
+- `--clean`: Wipe existing data before restoration
 
 #### Restore Database
 Restore databases to running containers from a backup.
 ```bash
-coolify-tools restoredb target.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000
+coolify-tools restoredb target.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000 [flags]
+```
+
+or a specific container
+
+```bash
+coolify-tools restoredb target.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000 [flags] <container-name>
 ```
 
 ### Limitations
 
-- [ ] Does not backup db images.
 - [ ] Does not backup bind mounts. For now. 
 - [ ] Only backs up running container's volumes
 - [ ] No S3 support
-- [ ] Does not tie a backup to a particular coolify version. Placeholder v4.0.0 used. 
+- [ ] Does not tie a backup to a particular coolify version. Placeholder v4.0.1 used. 
 
 
 ### Feature plans
