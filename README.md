@@ -16,7 +16,7 @@ These flags can be used with any command:
 
 - `-u, --username <string>`: SSH Username (default "root")
 - `-p, --port <string>`: Custom SSH port (default "22")
-- `--passphrase <string>`: Private key passphrase
+- `--passphrase <string>`: Private key passphrase. Extremely unsafe, logged in history, process info and etc. Use at your own risk
 
 #### Backup
 Create an encrypted local backup of a Coolify instance.

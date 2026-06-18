@@ -44,7 +44,7 @@ var dbKeywords = []DBEngine{
 type Metadata struct {
 	Timestamp      string           `json:"timestamp"`
 	CoolifyVersion string           `json:"coolifyVersion"`
-	Config         VolumeBackup     `json:"config"`
+	CoreVolume     VolumeBackup     `json:"coreVolume"`
 	CoreDB         DatabaseBackup   `json:"coreDB"`
 	Volumes        []VolumeBackup   `json:"volumes"`
 	Databases      []DatabaseBackup `json:"databases"`
@@ -192,18 +192,22 @@ func streamToEncryptedTarArchive(client *ssh.Client, signer ssh.Signer, destinat
 // backupCmd represents the backup command
 var backupCmd = &cobra.Command{
 	Use:   "backup",
-	Short: "Creates an encrypted backup of the Coolify core and volumes",
-	Long: `Connects to a Coolify instance, archives the /data/coolify directory alongside non-database volumes, and encrypts everything locally with an SSH key.
+	Short: "Creates an encrypted backup of a specified running container or Coolify core and all volumes of running containers",
+	Long: `Connects to a Coolify instance, archives the /data/coolify directory alongside volumes, and encrypts everything locally with an SSH key. Or only a specific container. 
 
 Example:
-  coolify-tools backup <hostname> <path-to-ssh-key>
+  coolify-tools backup <hostname> <path-to-ssh-key> <container-name?>
   coolify-tools backup server.example.com ~/.ssh/id_ed25519`,
 	Args: cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		// TODO: validate args
+		// var targetContainer string
 
 		hostname := args[0]
 		sshKey := args[1]
+		// if len(args) == 3 {
+		// 	targetContainer = args[2]
+		// }
 
 		client, signer := internalssh.EstablishConnection(username, hostname, sshKey, sshPort, passphrase)
 
@@ -229,8 +233,9 @@ Example:
 			log.Fatalf("failed to create dir %v", err)
 		}
 
-		metadata.Config.ArchiveName = "core.tar.gz.age"
-		metadata.Config.Destination = "/data/coolify/"
+		metadata.CoreVolume.ArchiveName = "core.tar.gz.age"
+		metadata.CoreVolume.Destination = "/data/coolify/"
+		metadata.CoreVolume.ContainerName = "coolify"
 
 		backupErr := streamToEncryptedTarArchive(client, signer, backupDir+"/core.tar.gz.age", "tar -czf - /data/coolify")
 

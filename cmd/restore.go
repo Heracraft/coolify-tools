@@ -242,7 +242,7 @@ Example:
 			}
 		}
 
-		streamDecryptedArchive(client, rawPrivateKey, "tar -xzf - -C /", backupDir+backupMetadata.Config.ArchiveName)
+		streamDecryptedArchive(client, rawPrivateKey, "tar -xzf - -C /", backupDir+backupMetadata.CoreVolume.ArchiveName)
 
 		restoreSSHKeys(client)
 
