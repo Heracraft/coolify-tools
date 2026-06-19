@@ -1,15 +1,19 @@
 package utils
 
 import (
+	"bufio"
+	"bytes"
+	"fmt"
 	"log"
 	"os"
 	"strconv"
 	"strings"
-	"bufio"
-	"bytes"
-	"fmt"
 
 	"golang.org/x/crypto/ssh"
+
+	"encoding/json"
+
+	"coolify-tools/internal/docker"
 )
 
 func HandleErr(format string, err error, args ...any) {
@@ -28,6 +32,63 @@ func ParseOutputAsNumber(stdout []byte) int {
 	return number
 }
 
+func Exists(dir string) bool {
+	// checks if dir/file exists
+	_, err := os.Stat(dir)
+	if err != nil {
+		return false
+	}
+	return true
+}
+
+// cred: https://dev.to/tidalcloud/interactive-cli-prompts-in-go-3bj9
+func YesNoPrompt(label string, def bool) bool {
+	choices := "Y/n"
+	if !def {
+		choices = "y/N"
+	}
+
+	r := bufio.NewReader(os.Stdin)
+	var s string
+
+	for {
+		fmt.Fprintf(os.Stderr, "%s (%s) ", label, choices)
+		s, _ = r.ReadString('\n')
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return def
+		}
+		s = strings.ToLower(s)
+		if s == "y" || s == "yes" {
+			return true
+		}
+		if s == "n" || s == "no" {
+			return false
+		}
+	}
+}
+
+// ---
+
+func GetCoolifyVersion(client *ssh.Client) string {
+	session, err := client.NewSession()
+	HandleErr("Failed to create ssh session", err)
+	defer session.Close()
+
+	output, err := session.Output("docker inspect coolify")
+	HandleErr("failed to inspect coolify", err)
+
+	var coolifyContainer docker.Container
+
+	if err := json.Unmarshal(output, &coolifyContainer); err != nil {
+		HandleErr("Failed to parse docker inspect output", err)
+	}
+
+	version := strings.Split(coolifyContainer.Config.Image, "coolify:")
+
+	return version[0]
+}
+
 func InstallCoolify(client *ssh.Client, version string) {
 	cmdStr := "curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash -s " + version
 
@@ -39,7 +100,7 @@ func InstallCoolify(client *ssh.Client, version string) {
 	session.Stdout = os.Stdout
 	session.Stderr = os.Stderr
 
-	fmt.Println("Starting coolify installation v"+version)
+	fmt.Println("Starting coolify installation v" + version)
 
 	err = session.Run(cmdStr)
 
@@ -56,40 +117,4 @@ func InstallCoolify(client *ssh.Client, version string) {
 	}
 
 	fmt.Println("Installation command completed successfully.")
-}
-
-func Exists(dir string) bool {
-	_, err := os.Stat(dir)
-	if err != nil {
-		return false
-	}
-	return true
-}
-
-
-// cred: https://dev.to/tidalcloud/interactive-cli-prompts-in-go-3bj9
-func YesNoPrompt(label string, def bool) bool {
-    choices := "Y/n"
-    if !def {
-        choices = "y/N"
-    }
-
-    r := bufio.NewReader(os.Stdin)
-    var s string
-
-    for {
-        fmt.Fprintf(os.Stderr, "%s (%s) ", label, choices)
-        s, _ = r.ReadString('\n')
-        s = strings.TrimSpace(s)
-        if s == "" {
-            return def
-        }
-        s = strings.ToLower(s)
-        if s == "y" || s == "yes" {
-            return true
-        }
-        if s == "n" || s == "no" {
-            return false
-        }
-    }
 }
