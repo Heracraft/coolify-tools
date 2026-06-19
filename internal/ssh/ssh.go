@@ -35,8 +35,8 @@ func GetSigner(key string, flagPassphrase string) ssh.Signer {
 			if flagPassphrase == "" {
 
 				fmt.Print("Enter key passphrase: ")
-				passphrase, pErr := term.ReadPassword(int(syscall.Stdin))
-
+				var pErr error
+				passphrase, pErr = term.ReadPassword(int(syscall.Stdin))
 				utils.HandleErr("failed to read password", pErr)
 
 				defer func() {
@@ -72,7 +72,7 @@ func EstablishConnection(username string, hostname string, privateKey string, ss
 	signer := GetSigner(privateKey, flagPassphrase)
 
 	hostCallback := CreateInteractiveHostKeyCallback(os.Getenv("HOME") + "/.ssh/known_hosts")
-	
+
 	config := &ssh.ClientConfig{
 		User: username,
 		Auth: []ssh.AuthMethod{
@@ -112,8 +112,8 @@ func GetRawPrivateKey(key string, flagPassphrase string) interface{} {
 			if flagPassphrase == "" {
 
 				fmt.Print("Enter key passphrase: ")
-				passphrase, pErr := term.ReadPassword(int(syscall.Stdin))
-
+				var pErr error
+				passphrase, pErr = term.ReadPassword(int(syscall.Stdin))
 				utils.HandleErr("failed to read password", pErr)
 
 				defer func() {
@@ -144,7 +144,6 @@ func GetRawPrivateKey(key string, flagPassphrase string) interface{} {
 
 	return privateKey
 }
-
 
 // WARN: The code below (2 functions) is pure slop. No human oversight.
 // TODO: review/refactor the code below.

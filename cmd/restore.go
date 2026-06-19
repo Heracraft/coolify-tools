@@ -19,16 +19,23 @@ import (
 	"filippo.io/age/agessh"
 	"golang.org/x/crypto/ssh"
 
+	"coolify-tools/internal/docker"
 	internalssh "coolify-tools/internal/ssh"
 	"coolify-tools/internal/utils"
-	"coolify-tools/internal/docker"
 
 	"github.com/spf13/cobra"
 )
 
 var restoreClean bool
 
-func getDecryptReader(client *ssh.Client, rawPrivateKey interface{}, localPath string) (io.Reader, *os.File) {
+func isTargetContainerVolume(target string, vol VolumeBackup) bool {
+	isContainerNameMatch := strings.HasPrefix(vol.ContainerName, target) || vol.ContainerName == target
+	isVolumeNameMatch := strings.HasPrefix(vol.Name, target) || vol.Name == target
+
+	return isContainerNameMatch || isVolumeNameMatch
+}
+
+func getDecryptReader(rawPrivateKey interface{}, localPath string) (io.Reader, *os.File) {
 	var ageIdentity age.Identity
 
 	if !utils.Exists(localPath) {
@@ -75,7 +82,7 @@ func streamDecryptedArchive(client *ssh.Client, rawPrivateKey interface{}, cmd s
 	utils.HandleErr("Failed to create ssh session", err)
 	defer session.Close()
 
-	decryptedReader, file := getDecryptReader(client, rawPrivateKey, localPath)
+	decryptedReader, file := getDecryptReader(rawPrivateKey, localPath)
 	defer file.Close()
 
 	session.Stdin = decryptedReader
@@ -94,7 +101,7 @@ func restoreDatabase(client *ssh.Client, rawPrivateKey interface{}, dbMetadata D
 	utils.HandleErr("Failed to create ssh session", err)
 	defer session.Close()
 
-	decryptedReader, file := getDecryptReader(client, rawPrivateKey, localPath)
+	decryptedReader, file := getDecryptReader(rawPrivateKey, localPath)
 	defer file.Close()
 
 	session.Stdin = decryptedReader
@@ -123,7 +130,7 @@ func restoreDatabase(client *ssh.Client, rawPrivateKey interface{}, dbMetadata D
 	}
 }
 
-// TODO: Review function below. Mostly slop. 
+// TODO: Review function below. Mostly slop.
 func restoreSSHKeys(client *ssh.Client) {
 	log.Println("Restoring Coolify SSH keys to authorized_keys...")
 
@@ -191,13 +198,18 @@ var restoreCmd = &cobra.Command{
 Connects to the target server, installs Coolify if necessary, and restores the configuration and volumes from the encrypted backup directory.
 
 Example:
-  coolify-tools restore server.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000`,
-	Args: cobra.ExactArgs(3),
+  coolify-tools restore <hostname> <ssh-key> <backup-path> <target-container?>,
+  coolify-tools restore server.example.com id_ed25519 .coolify/20260524_120000`,
+	Args: cobra.MinimumNArgs(3),
 	Run: func(cmd *cobra.Command, args []string) {
 		hostname := args[0]
 		sshKey := args[1]
+		var targetContainer string
 
 		backupDir := args[2]
+		if len(args) == 4 {
+			targetContainer = args[3]
+		}
 
 		if !utils.Exists(backupDir) {
 			log.Fatalf("backup dir specified does not exist")
@@ -212,8 +224,52 @@ Example:
 		rawPrivateKey := internalssh.GetRawPrivateKey(sshKey, passphrase)
 		defer client.Close()
 
+		if targetContainer != "" {
+			// Stop target container before cleaning or writing volumes
+			stopSession, err := client.NewSession()
+			if err == nil {
+				log.Printf("Stopping target container %s...", targetContainer)
+				_ = stopSession.Run(fmt.Sprintf("docker stop %s", targetContainer))
+				stopSession.Close()
+			}
+
+			if restoreClean {
+				fmt.Println("Cleaning existing targeted volumes...")
+				for _, vol := range backupMetadata.Volumes {
+					if !isTargetContainerVolume(targetContainer, vol) {
+						continue
+					}
+					volCleanSession, err := client.NewSession()
+					if err == nil {
+						cleanCmd := fmt.Sprintf("docker run --rm -v %s:/target alpine sh -c 'rm -rf /target/*'", vol.Name)
+						volCleanSession.Run(cleanCmd)
+						volCleanSession.Close()
+					}
+				}
+			}
+
+			for _, vol := range backupMetadata.Volumes {
+				if !isTargetContainerVolume(targetContainer, vol) {
+					continue
+				}
+				volPath := backupDir + vol.ArchiveName
+				restoreVolCmd := fmt.Sprintf("docker run -i --rm -v %s:/target alpine tar -xzf - -C /target", vol.Name)
+				streamDecryptedArchive(client, rawPrivateKey, restoreVolCmd, volPath)
+			}
+
+			// Start target container back up
+			startSession, err := client.NewSession()
+			if err == nil {
+				log.Printf("Starting target container %s...", targetContainer)
+				_ = startSession.Run(fmt.Sprintf("docker start %s", targetContainer))
+				startSession.Close()
+			}
+
+			return // Exit early for targeted restore!
+		}
+
+		// Full restore logic begins here:
 		utils.InstallCoolify(client, backupMetadata.CoolifyVersion)
-		fmt.Println("Stopping Coolify services...")
 		stopSession, err := client.NewSession()
 		utils.HandleErr("Failed to create ssh session to stop coolify", err)
 
@@ -221,6 +277,7 @@ Example:
 		stopSession.Stderr = os.Stderr
 		// TODO: make this configurable. --verbose?
 
+		fmt.Println("Stopping Coolify services...")
 		err = stopSession.Run("docker stop coolify coolify-redis") // Notice how coolify-db is not stopped
 		utils.HandleErr("failed to stop coolify containers", err)
 		stopSession.Close()
@@ -244,16 +301,12 @@ Example:
 		}
 
 		streamDecryptedArchive(client, rawPrivateKey, "tar -xzf - -C /", backupDir+backupMetadata.CoreVolume.ArchiveName)
-
 		restoreSSHKeys(client)
 
 		for _, vol := range backupMetadata.Volumes {
 			volPath := backupDir + vol.ArchiveName
-
 			restoreVolCmd := fmt.Sprintf("docker run -i --rm -v %s:/target alpine tar -xzf - -C /target", vol.Name)
-
 			streamDecryptedArchive(client, rawPrivateKey, restoreVolCmd, volPath)
-
 		}
 
 		// containers are not running. we cannot restore the dbs.
@@ -265,7 +318,6 @@ Example:
 
 		coreDBPath := filepath.Join(backupDir, backupMetadata.CoreDB.ArchiveName)
 		restoreDatabase(client, rawPrivateKey, backupMetadata.CoreDB, coreDBPath)
-
 
 		startCoolify := utils.YesNoPrompt("Start coolify?", true)
 
@@ -280,7 +332,6 @@ Example:
 			startSession.Run("curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash")
 
 			defer startSession.Close()
-
 		}
 	},
 }

@@ -66,6 +66,7 @@ func getRunningContainers(client *ssh.Client, targetContainer string) []docker.C
 	}
 
 	session, err = client.NewSession()
+	utils.HandleErr("failed to start ssh session", err)
 	defer session.Close()
 
 	out, err = session.Output(fmt.Sprintf("docker inspect %s", strings.Join(containerIds, " ")))
@@ -153,7 +154,7 @@ var backupCmd = &cobra.Command{
 	Long: `Connects to a Coolify instance, archives the /data/coolify directory alongside volumes, and encrypts everything locally with an SSH key. Or only a specific container. 
 
 Example:
-  coolify-tools backup <hostname> <path-to-ssh-key> <container-name?>
+  coolify-tools backup <hostname> <path-to-ssh-key> <target-container?>
   coolify-tools backup server.example.com ~/.ssh/id_ed25519`,
 	Args: cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
@@ -204,10 +205,9 @@ Example:
 			}
 		}
 
-		// TODO: skip the following except metadata stuff if running containers is nil
 		fileVolumes, dbVolumes := docker.CategorizeVolumes(runningContainers)
 
-		// '_' -> Db volumes are ignored for now.
+		fmt.Printf("\nBacking up %d volumes\n", len(fileVolumes)+len(dbVolumes))
 
 		for _, vol := range fileVolumes {
 

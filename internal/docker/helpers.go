@@ -50,3 +50,4 @@ func CategorizeVolumes(containers []Container) (fileVolumes []Container, dbVolum
 
 	return fileVolumes, dbVolumes
 }
+
