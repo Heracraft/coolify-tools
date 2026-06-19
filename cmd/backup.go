@@ -19,27 +19,13 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 
+	"coolify-tools/internal/docker"
 	internalssh "coolify-tools/internal/ssh"
 	"coolify-tools/internal/utils"
 )
 
 var ouputDir string
 var clean bool
-
-type DBEngine string
-
-const (
-	EnginePostgres   DBEngine = "postgres"
-	EngineMysql      DBEngine = "mysql"
-	EngineMariadb    DBEngine = "mariadb"
-	EngineMongo      DBEngine = "mongo"
-	EngineRedis      DBEngine = "redis"
-	EngineClickhouse DBEngine = "clickhouse"
-)
-
-var dbKeywords = []DBEngine{
-	EnginePostgres, EngineMysql, EngineMariadb, EngineMongo, EngineRedis, EngineClickhouse,
-}
 
 type Metadata struct {
 	Timestamp      string           `json:"timestamp"`
@@ -59,63 +45,12 @@ type VolumeBackup struct {
 }
 
 type DatabaseBackup struct {
-	ContainerName string   `json:"containerName"`
-	Engine        DBEngine `json:"engine"`
-	ArchiveName   string   `json:"archiveName"`
+	ContainerName string          `json:"containerName"`
+	Engine        docker.DBEngine `json:"engine"`
+	ArchiveName   string          `json:"archiveName"`
 }
 
-type Container struct {
-	Name   string `json:"Name"`
-	Config struct {
-		Image string `json:"Image"`
-	} `json:"Config"`
-	Mounts []Mount `json:"Mounts"`
-}
-
-type Mount struct {
-	Type        string `json:"Type"`
-	Name        string `json:"Name"`
-	Destination string `json:"Destination"`
-}
-
-func isDatabaseImage(image string) bool {
-	image = strings.ToLower(image)
-
-	for _, kw := range dbKeywords {
-		if strings.Contains(image, string(kw)) {
-			return true
-		}
-	}
-	return false
-}
-
-func categorizeVolumes(containers []Container) (fileVolumes []Container, dbVolumes []Container) {
-	fileVSet := make(map[string]Container)
-	dbVSet := make(map[string]Container)
-
-	for _, c := range containers {
-
-		if isDatabaseImage(c.Config.Image) {
-			dbVSet[c.Name] = c
-		} else {
-			fileVSet[c.Name] = c
-		}
-	}
-
-	for containerName := range fileVSet {
-		// TODO: Edge case: A volume shouldn't be backed up as a file if another container
-		// identified it as a DB volume.
-		fileVolumes = append(fileVolumes, fileVSet[containerName])
-	}
-
-	for containerName := range dbVSet {
-		dbVolumes = append(dbVolumes, dbVSet[containerName])
-	}
-
-	return fileVolumes, dbVolumes
-}
-
-func getRunningContainers(client *ssh.Client) []Container {
+func getRunningContainers(client *ssh.Client, targetContainer string) []docker.Container {
 	session, err := client.NewSession()
 	utils.HandleErr("failed to start ssh session", err)
 
@@ -136,10 +71,32 @@ func getRunningContainers(client *ssh.Client) []Container {
 	out, err = session.Output(fmt.Sprintf("docker inspect %s", strings.Join(containerIds, " ")))
 	utils.HandleErr("Failed to inspect containers", err, "%s", out)
 
-	var containers []Container
+	var containers []docker.Container
 
 	if err := json.Unmarshal(out, &containers); err != nil {
 		log.Fatalf("Failed to parse docker inspect output %v", err)
+	}
+
+	if targetContainer != "" {
+		var filteredContainers []docker.Container
+
+		for _, container := range containers {
+			isNameMatch := container.Name == targetContainer || strings.Contains(container.Name, targetContainer)
+
+			isIDMatch := container.ID == targetContainer || strings.HasPrefix(container.ID, targetContainer)
+
+			composeProject := container.Config.Labels["com.docker.compose.project"]
+			composeService := container.Config.Labels["com.docker.compose.service"]
+
+			isComposeMatch := composeProject == targetContainer || composeService == targetContainer
+
+			if isNameMatch || isIDMatch || isComposeMatch {
+				// targetContainer can be the container id, name, compose project/service
+				filteredContainers = append(filteredContainers, container)
+			}
+		}
+
+		return filteredContainers
 	}
 
 	return containers
@@ -201,56 +158,54 @@ Example:
 	Args: cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		// TODO: validate args
-		// var targetContainer string
+		var targetContainer string
 
 		hostname := args[0]
 		sshKey := args[1]
-		// if len(args) == 3 {
-		// 	targetContainer = args[2]
-		// }
+		if len(args) == 3 {
+			targetContainer = args[2]
+		}
 
 		client, signer := internalssh.EstablishConnection(username, hostname, sshKey, sshPort, passphrase)
 
 		defer client.Close()
-
-		// fmt.Println(signer.PublicKey().Type())
-
-		timestamp := time.Now().Format("20060102_150405")
-
-		// TODO: set this to the actual version
-		var metadata = Metadata{Timestamp: timestamp, CoolifyVersion: "v4.1.0"}
 
 		if err := exec.Command("mkdir", "-p", ouputDir).Run(); err != nil {
 			// TODO: replace mkdir -p with os.MkdirAll(backupDir, 0755)
 			log.Fatalf("failed to create dir %v", err)
 		}
 
-		backupDir := fmt.Sprintf("%s/%s", ouputDir, timestamp)
+		timestamp := time.Now().Format("20060102_150405")
+		coolifyVersion := utils.GetCoolifyVersion(client)
+		var metadata = Metadata{Timestamp: timestamp, CoolifyVersion: coolifyVersion}
 
-		// var backupDirCmd = fmt.Sprintf("mkdir -p %s", backupDir)
+		backupDir := fmt.Sprintf("%s/%s", ouputDir, timestamp)
 
 		if err := exec.Command("mkdir", "-p", backupDir).Run(); err != nil {
 			log.Fatalf("failed to create dir %v", err)
 		}
 
-		metadata.CoreVolume.ArchiveName = "core.tar.gz.age"
-		metadata.CoreVolume.Destination = "/data/coolify/"
-		metadata.CoreVolume.ContainerName = "coolify"
-
-		backupErr := streamToEncryptedTarArchive(client, signer, backupDir+"/core.tar.gz.age", "tar -czf - /data/coolify")
-
-		if backupErr != nil {
-			log.Printf("Backup failed for %s: %v", "/data/coolify", backupErr)
-		}
-
-		runningContainers := getRunningContainers(client)
+		// -------
+		runningContainers := getRunningContainers(client, targetContainer)
 
 		if runningContainers == nil {
 			fmt.Println("no running containers")
 		}
 
+		if targetContainer == "" {
+			// only backup core coolify core when doing a full sys backup
+			metadata.CoreVolume.ArchiveName = "core.tar.gz.age"
+			metadata.CoreVolume.Destination = "/data/coolify/"
+			metadata.CoreVolume.ContainerName = "coolify"
+
+			backupErr := streamToEncryptedTarArchive(client, signer, backupDir+"/core.tar.gz.age", "tar -czf - /data/coolify")
+			if backupErr != nil {
+				log.Printf("Backup failed for %s: %v", "/data/coolify", backupErr)
+			}
+		}
+
 		// TODO: skip the following except metadata stuff if running containers is nil
-		fileVolumes, dbVolumes := categorizeVolumes(runningContainers)
+		fileVolumes, dbVolumes := docker.CategorizeVolumes(runningContainers)
 
 		// '_' -> Db volumes are ignored for now.
 
@@ -260,7 +215,7 @@ Example:
 			cleanContainerName := strings.TrimPrefix(vol.Name, "/")
 
 			for _, mount := range vol.Mounts {
-				if mount.Type != "volume" {
+				if strings.Contains(mount.Destination, "/data/coolify") || mount.Type != "volume" {
 					// this is a bind mount. we probably have it in /data/coolify/. skip.
 					// TODO: handle this more robustly
 					fmt.Println("Skipping mount: ", mount.Name, "-> ", mount.Destination)
@@ -290,9 +245,9 @@ Example:
 
 		for _, db := range dbVolumes {
 			cleanDbName := strings.TrimPrefix(db.Name, "/")
-			var engine DBEngine
+			var engine docker.DBEngine
 
-			for _, kw := range dbKeywords {
+			for _, kw := range docker.DBKeywords {
 				if strings.Contains(db.Config.Image, strings.ToLower(string(kw))) {
 					engine = kw
 				}
@@ -302,27 +257,27 @@ Example:
 
 			// TODO: compress db dumps before archiving
 			switch engine {
-			case EngineMongo:
+			case docker.EngineMongo:
 				fmt.Printf("Skipping MongoDB database: %s\n", cleanDbName)
 				continue
-			case EngineMariadb:
+			case docker.EngineMariadb:
 				fmt.Printf("Skipping MariaDB database: %s\n", cleanDbName)
 				continue
-			case EnginePostgres:
+			case docker.EnginePostgres:
 				cleanFlag := ""
 				if clean {
 					cleanFlag = "--clean "
 				}
 				remoteCmd = fmt.Sprintf(`docker exec %s sh -c 'pg_dumpall %s-U ${POSTGRES_USER:-postgres}'`, cleanDbName, cleanFlag)
 				extension = "sql"
-			case EngineMysql:
+			case docker.EngineMysql:
 				cleanFlag := ""
 				if clean {
 					cleanFlag = "--add-drop-database --add-drop-table "
 				}
 				remoteCmd = fmt.Sprintf(`docker exec %s sh -c 'mysqldump %s-u root -p"${MYSQL_ROOT_PASSWORD}" --single-transaction --routines --triggers --all-databases'`, cleanDbName, cleanFlag)
 				extension = "sql"
-			case EngineRedis:
+			case docker.EngineRedis:
 				// TODO: look into REPLCONF capa error: NOAUTH Authentication required.
 				// use a common env like REDIS_PASSWORD? or just ignore?
 
@@ -355,7 +310,7 @@ Example:
 			} else {
 				metadata.CoreDB = DatabaseBackup{
 					ContainerName: db.Name,
-					Engine:        EnginePostgres,
+					Engine:        docker.EnginePostgres,
 					ArchiveName:   archiveName,
 				}
 			}

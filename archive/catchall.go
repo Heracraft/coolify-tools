@@ -16,7 +16,7 @@ func createTarArchive(client *ssh.Client) string {
 	session, err := client.NewSession()
 
 	if err != nil {
-		log.Fatal("failed to create ssh session %v", err)
+		log.Fatalf("failed to create ssh session %v", err)
 	}
 
 	out, err := session.CombinedOutput("du  /data/coolify -d 0 | awk '{print $1}'")

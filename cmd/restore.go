@@ -21,6 +21,7 @@ import (
 
 	internalssh "coolify-tools/internal/ssh"
 	"coolify-tools/internal/utils"
+	"coolify-tools/internal/docker"
 
 	"github.com/spf13/cobra"
 )
@@ -103,11 +104,11 @@ func restoreDatabase(client *ssh.Client, rawPrivateKey interface{}, dbMetadata D
 	var remoteCmd string
 
 	switch dbMetadata.Engine {
-	case EnginePostgres:
+	case docker.EnginePostgres:
 		remoteCmd = fmt.Sprintf(`docker exec -i %s sh -c 'psql -U ${POSTGRES_USER:-postgres}'`, dbMetadata.ContainerName)
-	case EngineMysql:
+	case docker.EngineMysql:
 		remoteCmd = fmt.Sprintf(`docker exec -i %s sh -c 'mysql -u root -p"${MYSQL_ROOT_PASSWORD}"'`, dbMetadata.ContainerName)
-	case EngineRedis:
+	case docker.EngineRedis:
 		// Redis requires writing to disk and restarting
 		remoteCmd = fmt.Sprintf(`cat > /tmp/%s.rdb && docker cp /tmp/%s.rdb %s:/data/dump.rdb && docker restart %s`,
 			dbMetadata.ContainerName, dbMetadata.ContainerName, dbMetadata.ContainerName, dbMetadata.ContainerName)
