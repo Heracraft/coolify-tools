@@ -78,15 +78,19 @@ func GetCoolifyVersion(client *ssh.Client) string {
 	output, err := session.Output("docker inspect coolify")
 	HandleErr("failed to inspect coolify", err)
 
-	var coolifyContainer docker.Container
+	var coolifyContainers []docker.Container
 
-	if err := json.Unmarshal(output, &coolifyContainer); err != nil {
+	if err := json.Unmarshal(output, &coolifyContainers); err != nil {
 		HandleErr("Failed to parse docker inspect output", err)
 	}
 
-	version := strings.Split(coolifyContainer.Config.Image, "coolify:")
+	if len(coolifyContainers) == 9 {
+		return "unknown"
+	}
 
-	return version[0]
+	version := strings.Split(coolifyContainers[0].Config.Image, "coolify:")
+
+	return version[1]
 }
 
 func InstallCoolify(client *ssh.Client, version string) {
