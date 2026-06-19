@@ -211,86 +211,40 @@ Example:
 			targetContainer = args[3]
 		}
 
-		if !utils.Exists(backupDir) {
-			log.Fatalf("backup dir specified does not exist")
+		err := runRestore(hostname, sshKey, backupDir, targetContainer)
+		utils.HandleErr("restore failed", err)
+	},
+}
+
+func runRestore(hostname, sshKey, backupDir, targetContainer string) error {
+	if !utils.Exists(backupDir) {
+		return fmt.Errorf("backup dir specified does not exist")
+	}
+	if !strings.HasSuffix(backupDir, "/") {
+		backupDir = backupDir + "/"
+	}
+
+	backupMetadata := readBackupMetadata(backupDir)
+
+	client, _ := internalssh.EstablishConnection(username, hostname, sshKey, sshPort, passphrase)
+	rawPrivateKey := internalssh.GetRawPrivateKey(sshKey, passphrase)
+	defer client.Close()
+
+	if targetContainer != "" {
+		// Stop target container before cleaning or writing volumes
+		stopSession, err := client.NewSession()
+		if err == nil {
+			log.Printf("Stopping target container %s...", targetContainer)
+			_ = stopSession.Run(fmt.Sprintf("docker stop %s", targetContainer))
+			stopSession.Close()
 		}
-		if !strings.HasSuffix(backupDir, "/") {
-			backupDir = backupDir + "/"
-		}
 
-		backupMetadata := readBackupMetadata(backupDir)
-
-		client, _ := internalssh.EstablishConnection(username, hostname, sshKey, sshPort, passphrase)
-		rawPrivateKey := internalssh.GetRawPrivateKey(sshKey, passphrase)
-		defer client.Close()
-
-		if targetContainer != "" {
-			// Stop target container before cleaning or writing volumes
-			stopSession, err := client.NewSession()
-			if err == nil {
-				log.Printf("Stopping target container %s...", targetContainer)
-				_ = stopSession.Run(fmt.Sprintf("docker stop %s", targetContainer))
-				stopSession.Close()
-			}
-
-			if restoreClean {
-				fmt.Println("Cleaning existing targeted volumes...")
-				for _, vol := range backupMetadata.Volumes {
-					if !isTargetContainerVolume(targetContainer, vol) {
-						continue
-					}
-					volCleanSession, err := client.NewSession()
-					if err == nil {
-						cleanCmd := fmt.Sprintf("docker run --rm -v %s:/target alpine sh -c 'rm -rf /target/*'", vol.Name)
-						volCleanSession.Run(cleanCmd)
-						volCleanSession.Close()
-					}
-				}
-			}
-
+		if restoreClean {
+			fmt.Println("Cleaning existing targeted volumes...")
 			for _, vol := range backupMetadata.Volumes {
 				if !isTargetContainerVolume(targetContainer, vol) {
 					continue
 				}
-				volPath := backupDir + vol.ArchiveName
-				restoreVolCmd := fmt.Sprintf("docker run -i --rm -v %s:/target alpine tar -xzf - -C /target", vol.Name)
-				streamDecryptedArchive(client, rawPrivateKey, restoreVolCmd, volPath)
-			}
-
-			// Start target container back up
-			startSession, err := client.NewSession()
-			if err == nil {
-				log.Printf("Starting target container %s...", targetContainer)
-				_ = startSession.Run(fmt.Sprintf("docker start %s", targetContainer))
-				startSession.Close()
-			}
-
-			return // Exit early for targeted restore!
-		}
-
-		// Full restore logic begins here:
-		utils.InstallCoolify(client, backupMetadata.CoolifyVersion)
-		stopSession, err := client.NewSession()
-		utils.HandleErr("Failed to create ssh session to stop coolify", err)
-
-		stopSession.Stdout = os.Stdout
-		stopSession.Stderr = os.Stderr
-		// TODO: make this configurable. --verbose?
-
-		fmt.Println("Stopping Coolify services...")
-		err = stopSession.Run("docker stop coolify coolify-redis") // Notice how coolify-db is not stopped
-		utils.HandleErr("failed to stop coolify containers", err)
-		stopSession.Close()
-
-		if restoreClean {
-			fmt.Println("Cleaning existing data...")
-			cleanSession, err := client.NewSession()
-			utils.HandleErr("Failed to create ssh session for cleaning", err)
-			// We use rm -rf but ignore errors if files don't exist
-			cleanSession.Run("rm -rf /data/coolify/*")
-			cleanSession.Close()
-
-			for _, vol := range backupMetadata.Volumes {
 				volCleanSession, err := client.NewSession()
 				if err == nil {
 					cleanCmd := fmt.Sprintf("docker run --rm -v %s:/target alpine sh -c 'rm -rf /target/*'", vol.Name)
@@ -300,40 +254,93 @@ Example:
 			}
 		}
 
-		streamDecryptedArchive(client, rawPrivateKey, "tar -xzf - -C /", backupDir+backupMetadata.CoreVolume.ArchiveName)
-		restoreSSHKeys(client)
-
 		for _, vol := range backupMetadata.Volumes {
+			if !isTargetContainerVolume(targetContainer, vol) {
+				continue
+			}
 			volPath := backupDir + vol.ArchiveName
 			restoreVolCmd := fmt.Sprintf("docker run -i --rm -v %s:/target alpine tar -xzf - -C /target", vol.Name)
 			streamDecryptedArchive(client, rawPrivateKey, restoreVolCmd, volPath)
 		}
 
-		// containers are not running. we cannot restore the dbs.
-
-		// for _, db := range backupMetadata.Databases {
-		// 	dbBackupPath := backupDir + db.ArchiveName
-		// 	restoreDatabase(client, rawPrivateKey, db, dbBackupPath)
-		// }
-
-		coreDBPath := filepath.Join(backupDir, backupMetadata.CoreDB.ArchiveName)
-		restoreDatabase(client, rawPrivateKey, backupMetadata.CoreDB, coreDBPath)
-
-		startCoolify := utils.YesNoPrompt("Start coolify?", true)
-
-		if startCoolify {
-			fmt.Println("Starting Coolify services...")
-			startSession, err := client.NewSession()
-			utils.HandleErr("Failed to create ssh session to start coolify", err)
-
-			startSession.Stderr = os.Stderr
-			startSession.Stdout = os.Stdout
-
-			startSession.Run("curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash")
-
-			defer startSession.Close()
+		// Start target container back up
+		startSession, err := client.NewSession()
+		if err == nil {
+			log.Printf("Starting target container %s...", targetContainer)
+			_ = startSession.Run(fmt.Sprintf("docker start %s", targetContainer))
+			startSession.Close()
 		}
-	},
+
+		return nil // Exit early for targeted restore!
+	}
+
+	// Full restore logic begins here:
+	utils.InstallCoolify(client, backupMetadata.CoolifyVersion)
+	stopSession, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("Failed to create ssh session to stop coolify: %v", err)
+	}
+
+	stopSession.Stdout = os.Stdout
+	stopSession.Stderr = os.Stderr
+
+	fmt.Println("Stopping Coolify services...")
+	err = stopSession.Run("docker stop coolify coolify-redis") // Notice how coolify-db is not stopped
+	if err != nil {
+		stopSession.Close()
+		return fmt.Errorf("failed to stop coolify containers: %v", err)
+	}
+	stopSession.Close()
+
+	if restoreClean {
+		fmt.Println("Cleaning existing data...")
+		cleanSession, err := client.NewSession()
+		if err != nil {
+			return fmt.Errorf("Failed to create ssh session for cleaning: %v", err)
+		}
+		cleanSession.Run("rm -rf /data/coolify/*")
+		cleanSession.Close()
+
+		for _, vol := range backupMetadata.Volumes {
+			volCleanSession, err := client.NewSession()
+			if err == nil {
+				cleanCmd := fmt.Sprintf("docker run --rm -v %s:/target alpine sh -c 'rm -rf /target/*'", vol.Name)
+				volCleanSession.Run(cleanCmd)
+				volCleanSession.Close()
+			}
+		}
+	}
+
+	streamDecryptedArchive(client, rawPrivateKey, "tar -xzf - -C /", backupDir+backupMetadata.CoreVolume.ArchiveName)
+	restoreSSHKeys(client)
+
+	for _, vol := range backupMetadata.Volumes {
+		volPath := backupDir + vol.ArchiveName
+		restoreVolCmd := fmt.Sprintf("docker run -i --rm -v %s:/target alpine tar -xzf - -C /target", vol.Name)
+		streamDecryptedArchive(client, rawPrivateKey, restoreVolCmd, volPath)
+	}
+
+	coreDBPath := filepath.Join(backupDir, backupMetadata.CoreDB.ArchiveName)
+	restoreDatabase(client, rawPrivateKey, backupMetadata.CoreDB, coreDBPath)
+
+	startCoolify := utils.YesNoPrompt("Start coolify?", true)
+
+	if startCoolify {
+		fmt.Println("Starting Coolify services...")
+		startSession, err := client.NewSession()
+		if err != nil {
+			return fmt.Errorf("Failed to create ssh session to start coolify: %v", err)
+		}
+
+		startSession.Stderr = os.Stderr
+		startSession.Stdout = os.Stdout
+
+		startSession.Run("curl -fsSL https://cdn.coollabs.io/coolify/install.sh | bash")
+
+		defer startSession.Close()
+	}
+
+	return nil
 }
 
 func init() {

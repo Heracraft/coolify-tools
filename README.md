@@ -67,6 +67,17 @@ or a specific container
 coolify-tools restoredb target.example.com ~/.ssh/id_ed25519 .coolify/20260524_120000 [flags] <container-name>
 ```
 
+#### Clone
+Clone a Coolify instance (or specific container) from a source host directly to a target host in one step.
+```bash
+coolify-tools clone source.example.com target.example.com id_ed25519 [target-container] [flags]
+```
+
+**Flags:**
+
+- `--keep`: Retain the local backup archive after the clone completes (default: `true`)
+- `--clean`: Wipe existing data on target before restoration
+
 ### Limitations
 
 - [ ] Does not backup bind mounts. For now. 
@@ -81,7 +92,7 @@ Features I plan to implement in the future. Purely based on my needs.
 
 - centralize config: backupDir, archiveName format, defaultSSHPort, ..etc
 
-- Clone command: self explanatory. backup + restore in one
+- [x] Clone command: self explanatory. backup + restore in one
 - Multiple signers: currently only one ssh key is used to sign each tar archive. I think backups should be encrypted by a minimum of 2 keys: your personal key + a backup key. Or even more if in a large team for example
 - Ability to cherrypick volumes: You might want to exclude some volumes from the backups. Rn you can do that by turning the container off but that's wasteful. I found myself transfering a 1GB+ volume of pure logs and I'd wanna skip that next time
 - Max size for volumes
