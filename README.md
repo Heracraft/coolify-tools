@@ -1,4 +1,8 @@
-Coolify instance wide backups. Currently only supports creating a an encrypted local backup of the coolify core, all file volumes and specific db engines. 
+Command line tooling for running Coolify in prod.
+
+- **Backup**: encrypted local backup of the Coolify core, file volumes, and specific db engines (whole instance or a single container)
+- **Restore / Clone**: restore a backup to a machine, or copy an instance straight from one host to another
+- **Harden**: lock down a fresh install with key-only SSH + fail2ban and a default-deny UFW firewall
 
 ---
 
@@ -7,8 +11,6 @@ Coolify instance wide backups. Currently only supports creating a an encrypted l
 The current integrated backup solution in coolify only supports backing up coolify's db and other databases deployed on the instance. This is great until you need to clone an instance or move an instance between machines. 
 
 This is the product of that need. And I need it yesterday!!!. Might upstream these changes into the official coolify cli when I get time. For now this is a simple tool to aid with my migration. 
-
-### Usage
 
 ### Global Flags
 
@@ -78,12 +80,37 @@ coolify-tools clone source.example.com target.example.com id_ed25519 [target-con
 - `--keep`: Retain the local backup archive after the clone completes (default: `true`)
 - `--clean`: Wipe existing data on target before restoration
 
+#### Harden
+Hardens a fresh install with some nice security defaults: key-only SSH + fail2ban, and a default-deny UFW firewall (including `ufw-docker` so Docker-published ports actually respect UFW).
+```bash
+coolify-tools harden server.example.com ~/.ssh/id_ed25519 [flags]
+```
+
+> [!WARNING]
+> This can lock you out of the server if something goes wrong (e.g. a firewall or SSH config mistake). Keep a second SSH session open to the target host the first time you run this, and consider `--dry-run` first.
+
+**Flags:**
+
+- `--allow-port <strings>`: Ports to allow through UFW, repeatable (default: `80/tcp,443/tcp,8000/tcp,6001/tcp,6002/tcp`). The current SSH port (`-p/--port`) is always allowed automatically.
+- `--tailscale-iface <string>`: Tailscale interface to allow unrestricted traffic on (e.g. `tailscale0`). Empty disables Tailscale rules (default).
+- `--proxy-container <string>`: Name of Coolify's proxy container to allow through `ufw-docker` on ports 80/443 (default `coolify-proxy`)
+- `--max-auth-tries <int>`, `--client-alive-interval <int>`, `--client-alive-count-max <int>`: sshd tuning (defaults `3`, `300`, `2`)
+- `--allow-password-auth`: Skip disabling SSH password authentication (default: disabled)
+- `--fail2ban-maxretry <int>`, `--fail2ban-findtime <int>`, `--fail2ban-bantime <int>`: fail2ban sshd jail tuning in seconds where applicable (defaults `3`, `600`, `3600`)
+- `--skip-ssh`, `--skip-fail2ban`, `--skip-ufw`, `--skip-ufw-docker`: Skip individual sections
+- `--dry-run`: Print the generated script instead of executing it
+- `-y, --yes`: Skip the confirmation prompt
+
+**Background:**
+The harden command simply translates a security checklist I have been running in production for a while now adapted from [Security....MassiveGRID Blog](https://massivegrid.com/blog/coolify-security-hardening/). I'd recommend running a similar setup manually then using this command to automate the process once you understand the solution and you need to re apply the same setup again. 
+
+Feel free to open a PR if you have other must haves or if you need more flexibility. 
+
 ### Limitations
 
 - [ ] Does not backup bind mounts. For now. 
 - [ ] Only backs up running container's volumes
 - [ ] No S3 support
-- [ ] Does not tie a backup to a particular coolify version. Placeholder v4.0.1 used. 
 
 
 ### Feature plans
