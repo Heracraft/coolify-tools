@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/ssh/knownhosts"
 	"golang.org/x/term"
 
-	"coolify-tools/internal/utils"
+	"github.com/Heracraft/coolify-tools/internal/utils"
 )
 
 func GetSigner(key string, flagPassphrase string) ssh.Signer {

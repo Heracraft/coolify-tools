@@ -1,4 +1,4 @@
-module coolify-tools
+module github.com/Heracraft/coolify-tools
 
 go 1.25.8
 

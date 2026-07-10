@@ -4,6 +4,16 @@ Command line tooling for running Coolify in prod.
 - **Restore / Clone**: restore a backup to a machine, or copy an instance straight from one host to another
 - **Harden**: lock down a fresh install with key-only SSH + fail2ban and a default-deny UFW firewall
 
+### Install
+
+Requires Go 1.25+.
+
+```bash
+go install github.com/Heracraft/coolify-tools@latest
+```
+
+This installs the `coolify-tools` binary to `$(go env GOPATH)/bin` (make sure that's on your `PATH`). <!-- Pin a specific version instead of `@latest` once tagged releases exist, e.g. `@v0.1.0`.-->
+
 ---
 
 ### Why? 

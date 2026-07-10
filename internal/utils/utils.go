@@ -13,7 +13,7 @@ import (
 
 	"encoding/json"
 
-	"coolify-tools/internal/docker"
+	"github.com/Heracraft/coolify-tools/internal/docker"
 )
 
 func HandleErr(format string, err error, args ...any) {

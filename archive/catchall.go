@@ -7,7 +7,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
-	"coolify-tools/internal/utils"
+	"github.com/Heracraft/coolify-tools/internal/utils"
 )
 
 

@@ -19,9 +19,9 @@ import (
 	"filippo.io/age"
 	"filippo.io/age/agessh"
 
-	"coolify-tools/internal/docker"
-	internalssh "coolify-tools/internal/ssh"
-	"coolify-tools/internal/utils"
+	"github.com/Heracraft/coolify-tools/internal/docker"
+	internalssh "github.com/Heracraft/coolify-tools/internal/ssh"
+	"github.com/Heracraft/coolify-tools/internal/utils"
 )
 
 var ouputDir string

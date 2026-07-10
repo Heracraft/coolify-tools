@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"coolify-tools/internal/harden"
-	internalssh "coolify-tools/internal/ssh"
-	"coolify-tools/internal/utils"
+	"github.com/Heracraft/coolify-tools/internal/harden"
+	internalssh "github.com/Heracraft/coolify-tools/internal/ssh"
+	"github.com/Heracraft/coolify-tools/internal/utils"
 )
 
 var (

@@ -11,8 +11,8 @@ import (
 	// "fmt"
 	"log"
 
-	internalssh "coolify-tools/internal/ssh"
-	"coolify-tools/internal/utils"
+	internalssh "github.com/Heracraft/coolify-tools/internal/ssh"
+	"github.com/Heracraft/coolify-tools/internal/utils"
 
 	"github.com/spf13/cobra"
 )
